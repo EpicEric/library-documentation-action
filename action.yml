@@ -10,9 +10,20 @@ inputs:
   docs_build_dir:
     description: 'Location, relative to the Makefile, that generated documentation will be placed'
     required: true
+  site_name:
+    description: 'Custom name for the website'
+    required: false
   site_url:
     description: 'Url for the site that the documentation will be hosted on'
     required: true
+  remove_other_docs:
+    description: 'If true, removes documentation for other libraries (stdlib, Corral dependencies) and replaces any references with the appropriate outgoing links'
+    required: false
+    default: 'true'
+  use_material_theme:
+    description: 'If true, replaces the default Ponylang theme with Mkdocs Material'
+    required: false
+    default: 'false'
   git_user_name:
     description: 'Name to associate with documentation commits'
     required: true

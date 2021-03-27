@@ -20,9 +20,11 @@ RUN pip3 install --upgrade pip \
   in_place \
   mkdocs \
   mkdocs-ponylang \
+  mkdocs-material \
   pylint \
   pyyaml
 
+COPY assets /assets/
 COPY entrypoint.py /entrypoint.py
 
 ENTRYPOINT ["/entrypoint.py"]

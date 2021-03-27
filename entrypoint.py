@@ -35,6 +35,20 @@ else:
 
 library_name = os.environ['INPUT_LIBRARY_NAME']
 docs_build_dir = os.environ['INPUT_DOCS_BUILD_DIR']
+use_material_str = os.environ.get('INPUT_USE_MATERIAL_THEME').trim().lower()
+if use_material_str not in ['true', 'false']:
+    print(f"{ERROR}Invalid 'INPUT_USE_MATERIAL_THEME' value: " \
+        + "expected 'true' or 'false', got " \
+        + f"'{os.environ['USE_MATERIAL_THEME']}'{ENDC}")
+    sys.exit(1)
+use_material = use_material == 'true'
+remove_other_docs_str = os.environ.get('INPUT_REMOVE_OTHER_DOCS').trim().lower()
+if remove_other_docs_str not in ['true', 'false']:
+    print(f"{ERROR}Invalid 'INPUT_REMOVE_OTHER_DOCS' value: " \
+        + "expected 'true' or 'false', got " \
+        + f"'{os.environ['INPUT_REMOVE_OTHER_DOCS']}'{ENDC}")
+    sys.exit(1)
+remove_other_docs = remove_other_docs == 'true'
 
 #
 # make the documentation
@@ -50,38 +64,40 @@ mkdocs_yml_file = os.path.join(docs_build_dir, 'mkdocs.yml')
 docs_dir = os.path.join(docs_build_dir, 'docs')
 index_file = os.path.join(docs_dir, 'index.md')
 source_dir = os.path.join(docs_dir, 'src')
+assets_dir = os.path.join(docs_dir, 'assets')
 
 #
 # remove any docs that aren't part of this library
 # store information about removed entries so we can fix up links to them later
 #
 
-print(INFO + "Removing 'other docs'." + ENDC)
 removed_docs = []
-for f in os.listdir(docs_dir):
-    if f in ('src', 'index.md'):
-        continue
+if remove_other_docs:
+    print(INFO + "Removing 'other docs'." + ENDC)
+    for f in os.listdir(docs_dir):
+        if f in ('src', 'index.md'):
+            continue
 
-    if not f.startswith(library_name + '-'):
-        p = os.path.join(docs_dir, f)
-        if os.path.isfile(p):
-            os.remove(p)
-        else:
-            shutil.rmtree(p)
-        removed_docs.append(f)
+        if not f.startswith(library_name + '-'):
+            p = os.path.join(docs_dir, f)
+            if os.path.isfile(p):
+                os.remove(p)
+            else:
+                shutil.rmtree(p)
+            removed_docs.append(f)
 
-#
-# remove any source code that isn't part of this library
-#
+    #
+    # remove any source code that isn't part of this library
+    #
 
-print(INFO + "Removing 'other sources'." + ENDC)
-for f in os.listdir(source_dir):
-    if f != library_name:
-        p = os.path.join(source_dir, f)
-        if os.path.isfile(p):
-            os.remove(p)
-        else:
-            shutil.rmtree(p)
+    print(INFO + "Removing 'other sources'." + ENDC)
+    for f in os.listdir(source_dir):
+        if f != library_name:
+            p = os.path.join(source_dir, f)
+            if os.path.isfile(p):
+                os.remove(p)
+            else:
+                shutil.rmtree(p)
 
 #
 # - trim mkdocs.yml down to entries for our library
@@ -103,11 +119,11 @@ with open(mkdocs_yml_file) as infile:
         # well that's how the yaml package represents this thing should be a
         # 2-element tuple or list
         for k in entry.keys():
-            if k == library_name:
+            if k == library_name or not remove_other_docs:
                 # library index entry. keep it.
                 new_nav.append(entry)
 
-            if k == library_package_key \
+            elif k == library_package_key \
               or k.startswith(library_subpackage_key):
                 # package entry. keep it.
                 # record the package name for later usage
@@ -123,117 +139,224 @@ with open(mkdocs_yml_file) as infile:
 # without this, the 404 page will be broken
 mkdocs_yml['site_url'] = os.environ['INPUT_SITE_URL']
 
+# Update site name if set
+site_name = os.environ.get('INPUT_SITE_NAME')
+if site_name is not None:
+    mkdocs_yml['site_name'] = site_name
+
+# Write changes to mkdocs.yml
 with open(mkdocs_yml_file, 'w') as outfile:
     yaml.dump(mkdocs_yml, outfile)
 
 #
-# trim docs/index.md down to entries for our library
+# Remove other docs from the remaining files.
 #
 
-print(INFO + "Trimming index.md." + ENDC)
-with in_place.InPlace(index_file) as fp:
-    for line in fp:
-        if not line.startswith('*'):
-            fp.write(line)
-        else:
-            for p in packages:
-                if line.startswith('* [' + p + ']'):
-                    fp.write(line)
+if remove_other_docs:
 
-#
-# `make docs` at the start will have pulled down any needed dependencies that
-# we might have. Here we are going to reach into the _corral directory to find
-# the `corral.json` for any dependencies and get:
-# - the package names
-# - the location of the documentation_url
-#
-# This should eventually be incorporated into `corral` as a command
-# or something similar. In the meantime, we are doing "by hand" in this
-# action as we work out how to accomplish everything that we want to.
-#
-# This could grab info about "extra" packages as there is on guarantee that a
-# dependency that was removed isn't still in _corral directory assuming that
-# this code was used outside of the context of this action that starts from a
-# clean-slate. That's not an edge condition to worry about at this time.
-#
-# packages provided are listed in `corral.json` in an array with the key
-# `packages`. Every package needs to be listed including those that are
-# "subpackages" so for example, we have package listings for `semver`,
-# `semver/constraint`, and `semver/version`.
-#
-# The documentation_url for a given package is located in the `info` object
-# in the `documentation_url` field.
-#
+    #
+    # trim docs/index.md down to entries for our library
+    #
 
-documentation_urls = {}
+    print(INFO + "Trimming index.md." + ENDC)
+    with in_place.InPlace(index_file) as fp:
+        for line in fp:
+            if not line.startswith('*'):
+                fp.write(line)
+            else:
+                for p in packages:
+                    if line.startswith('* [' + p + ']'):
+                        fp.write(line)
 
-if os.path.isdir("_corral"):
-    dependencies_dirs = os.listdir("_corral")
-    for dd in dependencies_dirs:
-        corral_file = "/".join(["_corral", dd, "corral.json"])
-        if not os.path.isfile(corral_file):
-            print(NOTICE + "No corral.json in " + dd + "." + ENDC)
+    #
+    # `make docs` at the start will have pulled down any needed dependencies
+    # that we might have. Here we are going to reach into the _corral directory
+    # to find the `corral.json` for any dependencies and get:
+    # - the package names
+    # - the location of the documentation_url
+    #
+    # This should eventually be incorporated into `corral` as a command
+    # or something similar. In the meantime, we are doing "by hand" in this
+    # action as we work out how to accomplish everything that we want to.
+    #
+    # This could grab info about "extra" packages as there is on guarantee that
+    # a dependency that was removed isn't still in _corral directory assuming
+    # that this code was used outside of the context of this action that starts
+    # from a clean-slate. That's not an edge condition to worry about at this
+    # time.
+    #
+    # packages provided are listed in `corral.json` in an array with the key
+    # `packages`. Every package needs to be listed including those that are
+    # "subpackages" so for example, we have package listings for `semver`,
+    # `semver/constraint`, and `semver/version`.
+    #
+    # The documentation_url for a given package is located in the `info` object
+    # in the `documentation_url` field.
+    #
+
+    documentation_urls = {}
+
+    if os.path.isdir("_corral"):
+        dependencies_dirs = os.listdir("_corral")
+        for dd in dependencies_dirs:
+            corral_file = "/".join(["_corral", dd, "corral.json"])
+            if not os.path.isfile(corral_file):
+                print(NOTICE + "No corral.json in " + dd + "." + ENDC)
+                continue
+
+            corral_data = json.load(open(corral_file, 'r'))
+            bundle_documentation_url = ""
+            try:
+                bundle_documentation_url = \
+                    corral_data['info']['documentation_url']
+            except KeyError as e:
+                print(NOTICE + "No documentation_url in " + corral_file + "." \
+                + ENDC)
+
+            try:
+                packages = corral_data['packages']
+                for p in packages:
+                    documentation_urls[p] = bundle_documentation_url
+            except KeyError as e:
+                print(NOTICE + "No packages in " + corral_file + "." \
+                + ENDC)
+
+    #
+    # Go through the markdown belonging to our package and replace missing
+    # entries with links to their external sites.
+    #
+
+    print(INFO + "Fixing links to code outside of our package." + ENDC)
+    for f in os.listdir(docs_dir):
+        if f == "src":
             continue
 
-        corral_data = json.load(open(corral_file, 'r'))
-        bundle_documentation_url = ""
-        try:
-            bundle_documentation_url = corral_data['info']['documentation_url']
-        except KeyError as e:
-            print(NOTICE + "No documentation_url in " + corral_file + "." \
-              + ENDC)
+        p = os.path.join(docs_dir, f)
+        print(INFO + "Fixing links in " + str(p) + "." + ENDC)
+        with in_place.InPlace(p) as fp:
+            for line in fp:
+                for removed in removed_docs:
+                    if removed in line:
+                        print(INFO + "Replacing link for " + removed + "." \
+                            + ENDC)
 
-        try:
-            packages = corral_data['packages']
-            for p in packages:
-                documentation_urls[p] = bundle_documentation_url
-        except KeyError as e:
-            print(NOTICE + "No packages in " + corral_file + "." \
-              + ENDC)
+                        # get the package name
+                        s = removed.replace('.md', '')
+                        s = s.split('-')
+                        if len(s) > 1:
+                            del s[-1]
+                        package_name = '/'.join(s)
+
+                        # if unknown package, we'll use the standard library
+                        external_url = documentation_urls.get(package_name, \
+                        'https://stdlib.ponylang.io/')
+
+                        # as the external url is input from users, it might not
+                        # include a trailing slash. if not, generated urls will
+                        # be broken.
+                        # there's far more validation we could do here, but in
+                        # terms of helping out a non-malicious user, this is
+                        # the minimum
+                        if not external_url.endswith('/'):
+                            external_url += '/'
+
+                        as_html = removed.replace('.md', '')
+                        link = external_url + as_html + "/"
+                        line = line.replace(removed, link)
+
+                fp.write(line)
 
 #
-# Go through the markdown belonging to our package and replace missing entries
-# with links to their external sites.
+# Make changes to support the official Material theme
 #
 
-print(INFO + "Fixing links to code outside of our package." + ENDC)
-for f in os.listdir(docs_dir):
-    if f == "src":
-        continue
+if use_material:
+    print(f"{INFO}Updating theme to support Mkdocs Material.{ENDC}")
 
-    p = os.path.join(docs_dir, f)
-    print(INFO + "Fixing links in " + str(p) + "." + ENDC)
-    with in_place.InPlace(p) as fp:
-        for line in fp:
-            for removed in removed_docs:
-                if removed in line:
-                    print(INFO + "Replacing link for " + removed + "." + ENDC)
+    skip_use_material = False:
+    mkdocs_yml = {}
+    with open(mkdocs_yml_file) as infile:
+        mkdocs_yml = yaml.load(infile, Loader=yaml.FullLoader)
+        theme = mkdocs_yml['theme']
+        if type(theme) != 'str':
+            theme = theme['name']
+        # Updates are only applied to the default 'ponylang' theme.
+        if theme != 'ponylang':
+            print(f"{NOTICE}Cannot update non-ponylang docs theme " \
+                + f"'{theme}' to use Mkdocs Material. Skipping.{ENDC}")
+            skip_use_material = True
+        else:
+            # Make changes to YAML configuration
+            mkdocs_yml['theme'] = {
+                'name': 'material',
+                'favicon': 'assets/logo.png',
+                'logo': 'assets/logo.png',
+                'palette': {
+                    'primary': 'brown',
+                    'accent': 'amber',
+                },
+                'features': [
+                    'navigation.instant',
+                ],
+            }
+            mkdocs_yml['markdown_extensions'] = [
+                'pymdownx.highlight',
+                'pymdownx.smartsymbols',
+                'pymdownx.superfences',
+                {
+                    'toc': {
+                        'permalink': True,
+                        'toc_depth': 3,
+                    },
+                },
+            ]
+            mkdocs_yml['markdown_extensions'] = [
+                'search',
+            ]
 
-                    # get the package name
-                    s = removed.replace('.md', '')
-                    s = s.split('-')
-                    if len(s) > 1:
-                        del s[-1]
-                    package_name = '/'.join(s)
+    if not skip_use_material:
 
-                    # if unknown package, we'll use the standard library
-                    external_url = documentation_urls.get(package_name, \
-                      'https://stdlib.ponylang.io/')
+        #
+        # Write updated mkdocs.yml
+        #
 
-                    # as the external url is input from users, it might not
-                    # include a trailing slash. if not, generated urls will
-                    # be broken.
-                    # there's far more validation we could do here, but in
-                    # terms of helping out a non-malicious user, this is the
-                    # minimum
-                    if not external_url.endswith('/'):
-                        external_url += '/'
+        with open(mkdocs_yml_file, 'w') as outfile:
+            yaml.dump(mkdocs_yml, outfile)
 
-                    as_html = removed.replace('.md', '')
-                    link = external_url + as_html + "/"
-                    line = line.replace(removed, link)
+        #
+        # Move the "/assets" directory into "docs/"
+        #
 
-            fp.write(line)
+        shutil.move('/assets', assets_dir)
+
+        #
+        # Update src files to hide table of contents
+        # and use Pygments with line numbers
+        #
+
+        for d in os.listdir(source_dir):
+            dp = os.path.join(source_dir, d)
+            if os.path.isfile(dp):
+                continue
+            for f in os.listdir(dp):
+                p = os.path.join(dp, f)
+                if not os.path.isfile(p):
+                    continue
+                with in_place.InPlace(p) as fp:
+                    for line in fp:
+                        if line == '```````pony-full-source':
+                            fp.writelines([
+                                '---',
+                                'hide:',
+                                '- toc',
+                                '---',
+                                '```````pony linenums="1"',
+                            ])
+                            break
+                        else:
+                            fp.write(line)
+                    # Copy remaining lines
+                    fp.writelines(fp.readlines())
 
 #
 # run mkdocs to actually build the content
